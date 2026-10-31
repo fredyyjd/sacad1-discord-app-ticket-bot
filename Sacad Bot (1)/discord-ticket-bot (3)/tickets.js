@@ -1,0 +1,300 @@
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  TextInputStyle,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  FileBuilder,
+  MessageFlags
+} = require("discord.js");
+const config = require("./config");
+
+// =====================================================================
+// TICKET SYSTEM
+// Each ticket type has its own emoji, label, and modal questions.
+// question.style: TextInputStyle.Short (one line) or .Paragraph (multi-line)
+// question.placeholder is optional extra hint text shown in the empty field.
+// =====================================================================
+const tickets = {
+  buying: {
+    emoji: "🦴",
+    label: "Buying Spawners",
+    questions: [
+      { label: "What's your IGN?", style: TextInputStyle.Short },
+      { label: "How many are you buying?", style: TextInputStyle.Short }
+    ]
+  },
+  selling: {
+    emoji: "🦴",
+    label: "Sell Spawners",
+    questions: [
+      { label: "What's your IGN?", style: TextInputStyle.Short },
+      { label: "How many are you selling?", style: TextInputStyle.Short }
+    ]
+  },
+  partnership: {
+    emoji: "🤝",
+    label: "Partnership",
+    questions: [
+      { label: "How many members does your server have?", style: TextInputStyle.Short },
+      { label: "Can you send your ad straight away?", style: TextInputStyle.Short }
+    ]
+  },
+  giveaway: {
+    emoji: "💵",
+    label: "Giveaway Claim/Sponsor",
+    questions: [
+      { label: "What did you win?", style: TextInputStyle.Short },
+      { label: "Who hosted the giveaway?", style: TextInputStyle.Short },
+      { label: "What's your IGN?", style: TextInputStyle.Short }
+    ]
+  },
+  gamble: {
+    emoji: "🤑",
+    label: "Missed Gamble",
+    questions: [
+      { label: "What happened?", style: TextInputStyle.Paragraph },
+      { label: "How much was missed?", style: TextInputStyle.Short },
+      { label: "What is your IGN?", style: TextInputStyle.Short }
+    ]
+  },
+  help: {
+    emoji: "⚙️",
+    label: "General Help",
+    questions: [
+      { label: "What is the problem?", style: TextInputStyle.Paragraph }
+    ]
+  }
+};
+
+// =====================================================================
+// TICKET PANEL
+// Sent as a Components V2 message (Container + separators) instead of a
+// plain embed, so it can hold long formatted rules text with dividers.
+// The select menu lives inside the same container, at the bottom.
+// =====================================================================
+async function sendTicketPanel(channel) {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId("ticket")
+    .setPlaceholder("Select...")
+    .addOptions(Object.entries(tickets).map(([k, v]) => ({
+      label: v.label,
+      value: k,
+      emoji: v.emoji,
+      description: "Click on this option to create a ticket"
+    })));
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0xC4A484)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        "# 🎫 WHAT TO OPEN A TICKET FOR :\n" +
+        "- Buying or selling Skeleton Spawners.(Please check ⁠#『🦴』➺spawner-prices before opening a ticket about Skeleton Spawners.)\n\n" +
+        "- Claiming a giveaway prize.\n\n" +
+        "- General support or questions.\n\n" +
+        "- Reporting a member for breaking server rules.(Server issues only — NOT DonutSMP related.)\n\n" +
+        "- Sponsoring a giveaway.\n\n" +
+        "- Partnership requests.(Please check ⁠<#1480179580995375187> before opening a partnership ticket.)\n\n" +
+        "- Other server-related help."
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        "**⚠️ We are NOT DonutSMP staff.**\n" +
+        "Please do not open tickets for DonutSMP issues."
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        "## ❌ DO NOT OPEN A TICKET FOR :\n" +
+        "**(Doing any of these may result in a timeout.)**\n\n" +
+        "- Trolling or wasting staff time.\n" +
+        "- Spam opening tickets.\n" +
+        "- Begging for money/items.\n" +
+        "- Fake reports or unnecessary tickets."
+      )
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small)
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        "## 📝 IMPORTANT NOTES :\n" +
+        "Staff will NEVER privately DM you first.\n" +
+        "Please be patient while waiting for staff responses.\n" +
+        "Do not ping staff repeatedly in tickets."
+      )
+    )
+    .addActionRowComponents(
+      new ActionRowBuilder().addComponents(menu)
+    );
+
+  await channel.send({
+    flags: MessageFlags.IsComponentsV2,
+    components: [container]
+  });
+}
+
+// =====================================================================
+// BUY AD PANEL
+// A single button (no dropdown, no modal) — clicking it opens a ticket
+// straight away in config.buyAd.category and pings config.buyAd.roles.
+// =====================================================================
+async function sendBuyAdPanel(channel) {
+  const e = new EmbedBuilder()
+    .setColor("#C4A484")
+    .setTitle("Buy Ad")
+    .setDescription("Buy a ad");
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("buyad_ticket").setLabel("Buy now").setStyle(ButtonStyle.Primary)
+  );
+  await channel.send({ embeds: [e], components: [row] });
+}
+
+// =====================================================================
+// TICKET LOGGING
+// Sent as a Components V2 message (Container + separators) so it can use
+// real headers (##/###) instead of plain embed fields.
+//
+// Pass:
+//   title       - e.g. "Ticket Closed", "Ticket Claimed", "Ticket Renamed"
+//   ticketChannel - the ticket's channel (mentionable) or a channel mention string
+//   category    - display name for what kind of ticket this is
+//   openedBy    - (optional) user/mention who originally opened the ticket.
+//                 Omit this for claim/unclaim/rename logs — only
+//                 open/close logs show who opened the ticket.
+//   actionLabel - heading for who performed this action, e.g. "Closed by",
+//                 "Claimed by", "Unclaimed by", "Renamed by", "Opened by"
+//   actionBy    - user/mention who performed the action
+//   reason      - (optional) extra line, e.g. a close reason or error
+//   color       - accent color as a hex number (e.g. 0xF04747)
+//   files       - (optional) attachments, e.g. a close transcript
+// =====================================================================
+async function logTicketEvent(guild, {
+  title,
+  ticketChannel,
+  category,
+  openedBy,
+  actionLabel,
+  actionBy,
+  reason,
+  color = 0xC4A484,
+  files = []
+}) {
+  if (!config.ticketLogChannel) return;
+  const channel = await guild.channels.fetch(config.ticketLogChannel).catch(() => null);
+  if (!channel) return;
+
+  // Compact single block — bold inline labels instead of big ##/### headers,
+  // so the whole log stays small instead of stretching across several
+  // full-size heading blocks.
+  const lines = [`**Channel:** ${ticketChannel}`];
+  if (openedBy) lines.push(`**Opened by:** ${openedBy}`);
+  if (actionLabel && actionBy) lines.push(`**${actionLabel}:** ${actionBy}`);
+  if (reason) lines.push(`**Reason:** ${reason}`);
+  lines.push(`**Category:** ${category || "Unknown"}`);
+
+  const container = new ContainerBuilder()
+    .setAccentColor(color)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${title}`))
+    .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join("\n")));
+
+  // Components V2 messages don't reliably show plain `files` attachments —
+  // Discord wants an explicit File component pointing at the upload, or it
+  // can get dropped. So for every file passed in, add one of those too.
+  for (const file of files) {
+    const fileName = file?.name || file?.attachment?.name;
+    if (fileName) {
+      container
+        .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small))
+        .addFileComponents(new FileBuilder().setURL(`attachment://${fileName}`));
+    }
+  }
+
+  await channel.send({
+    flags: MessageFlags.IsComponentsV2,
+    components: [container],
+    files,
+    // Mentions in the text above (opener/claimer/closer) are just plain
+    // text references here, not pings — nobody gets notified from this log.
+    allowedMentions: { parse: [] }
+  }).catch(() => {});
+}
+
+// Fetches every message in a ticket channel (oldest -> newest) and builds
+// a plain-text transcript. Returns { content, filename } so the caller can
+// wrap it in as many AttachmentBuilder instances as it needs to send.
+async function buildTranscript(channel, reason) {
+  const messages = [];
+  let before;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+    if (batch.size === 0) break;
+    messages.push(...batch.values());
+    before = batch.last().id;
+    if (batch.size < 100) break;
+  }
+  messages.reverse(); // oldest first
+
+  const lines = messages.map(m => {
+    const time = new Date(m.createdTimestamp).toISOString().replace("T", " ").slice(0, 19);
+    let line = `[${time}] ${m.author.tag}: ${m.content || ""}`;
+    if (m.attachments.size) {
+      line += ` [attachment(s): ${[...m.attachments.values()].map(a => a.url).join(", ")}]`;
+    }
+    if (m.embeds.length) {
+      line += ` [${m.embeds.length} embed(s)]`;
+    }
+    return line;
+  });
+
+  const header = `Transcript for #${channel.name}\nGenerated: ${new Date().toISOString()}\n${reason ? `Close reason: ${reason}\n` : ""}${"=".repeat(60)}\n\n`;
+  return { content: header + (lines.join("\n") || "(no messages)"), filename: `transcript-${channel.name}.txt` };
+}
+
+// =====================================================================
+// GIVEAWAY "JUMP TO WIN" BUTTON
+// Appended onto the ticket panel message (the one with Claim/Close) once
+// the giveaway checker finds a matching win, so staff can jump straight to
+// the announcement without leaving the ticket.
+// =====================================================================
+async function findTicketPanelMessage(channel) {
+  const messages = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+  if (!messages) return null;
+
+  return messages.find(msg =>
+    msg.author.id === channel.client.user.id &&
+    msg.components.some(row => row.components.some(c => c.customId === "close"))
+  ) || null;
+}
+
+async function addJumpToWinButton(channel, url) {
+  const panelMessage = await findTicketPanelMessage(channel);
+  if (!panelMessage) return;
+
+  const existingRow = panelMessage.components[0];
+  if (!existingRow) return;
+
+  const row = ActionRowBuilder.from(existingRow);
+  row.addComponents(
+    new ButtonBuilder().setLabel("Jump to Win").setEmoji("🔗").setStyle(ButtonStyle.Link).setURL(url)
+  );
+  const otherRows = panelMessage.components.slice(1).map(r => ActionRowBuilder.from(r));
+
+  await panelMessage.edit({ components: [row, ...otherRows] }).catch(() => {});
+}
+
+module.exports = { tickets, sendTicketPanel, sendBuyAdPanel, logTicketEvent, buildTranscript, addJumpToWinButton };
