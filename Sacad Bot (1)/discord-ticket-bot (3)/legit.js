@@ -117,6 +117,43 @@ async function fetchNoVoterIds(message) {
   return ids;
 }
 
+// ---------- Remove a banned user's NO reaction right away ----------
+// Discord doesn't clear a banned user's reactions on its own (they can sit
+// there for days), so the bot removes it itself the moment the ban lands.
+async function removeNoReaction(message, userId) {
+  try {
+    const reaction = message.reactions.cache.get(NO_ID);
+    if (!reaction) return;
+    await reaction.users.remove(userId);
+  } catch (err) {
+    console.error(`[legit] couldn't remove NO reaction of ${userId}:`, err.message);
+  }
+}
+
+// ---------- One-time-per-boot sweep: clear NO reactions of already-banned users ----------
+// Only ever removes a single banned user's reaction. Never touches the panel.
+async function sweepBanned(client) {
+  for (const [pollId, poll] of Object.entries(data.polls)) {
+    await enqueue(pollId, async () => {
+      const channel = await client.channels.fetch(poll.channelId).catch(() => null);
+      if (!channel) return;
+      const message = await channel.messages.fetch(pollId).catch(() => null);
+      if (!message) return;
+      const guild = await client.guilds.fetch(poll.guildId).catch(() => null);
+      if (!guild) return;
+      const ids = await fetchNoVoterIds(message).catch(() => null);
+      if (!ids) return;
+      for (const userId of ids) {
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (member) continue;                                   // still in the server, leave them
+        const ban = await guild.bans.fetch(userId).catch(() => null);
+        if (!ban) continue;                                     // left on their own, not banned, leave them
+        await removeNoReaction(message, userId);
+      }
+    });
+  }
+}
+
 // ---------- 24h check ----------
 async function checkExpired(client) {
   const now = Date.now();
@@ -153,6 +190,7 @@ async function checkExpired(client) {
         if (stillVoting.has(userId)) {
           try {
             await guild.members.ban(userId, { reason: "Voted no on 'Are we legit' and didn't open a General Help ticket within 24h" });
+            await removeNoReaction(message, userId); // instantly clear their NO vote
           } catch (err) {
             console.error(`[legit] couldn't ban ${userId}:`, err.message);
           }
@@ -206,6 +244,7 @@ function init(client) {
 
   client.once("ready", () => {
     checkExpired(client).catch(err => console.error("[legit] initial check failed:", err));
+    sweepBanned(client).catch(err => console.error("[legit] ban sweep failed:", err));
     setInterval(() => checkExpired(client).catch(err => console.error("[legit] check failed:", err)), 60 * 1000);
   });
 }
