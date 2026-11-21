@@ -34,7 +34,7 @@ module.exports = {
   // regular inactivityMs — see index.js's checkAutoCloseTickets().
   autoClose: {
     enabled: true,
-    inactivityMs: 5 * 24 * 60 * 60 * 1000, // 5 days — buying/selling/partnership/giveaway/gamble/help/buy-ad tickets
+    inactivityMs: 10 * 24 * 60 * 60 * 1000, // 10 days — buying/selling/partnership/giveaway/gamble/help/buy-ad tickets
     serviceInactivityMs: 10 * 24 * 60 * 60 * 1000, // 10 days — digout/base building (serviceCategories) tickets
     checkIntervalMs: 15 * 60 * 1000 // how often to scan for stale tickets
   },
