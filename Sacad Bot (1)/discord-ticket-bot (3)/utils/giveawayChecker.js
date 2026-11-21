@@ -82,6 +82,36 @@ function mentionsUser(text, userId) {
   return text.includes(`<@${userId}>`) || text.includes(`<@!${userId}>`) || text.includes(userId);
 }
 
+// How many people a giveaway message says won. Looks for "2 winners" /
+// "winners: 2" and also counts the unique people tagged, so a 1b prize with
+// 2 winners can be claimed as 500m each (or as the full 1b).
+function winnerCountsIn(text) {
+  const counts = new Set();
+  const lower = String(text || "").toLowerCase();
+
+  for (const m of lower.matchAll(/(\d{1,2})\s*winners?\b/g)) counts.add(parseInt(m[1], 10));
+  for (const m of lower.matchAll(/winners?\s*[:\-]?\s*(\d{1,2})\b/g)) counts.add(parseInt(m[1], 10));
+
+  const mentions = new Set([...String(text || "").matchAll(/<@!?(\d{15,25})>/g)].map(m => m[1])).size;
+  if (mentions > 1) {
+    counts.add(mentions);
+    counts.add(mentions - 1); // one of the tags is usually the host
+  }
+
+  return [...counts].filter(n => Number.isInteger(n) && n > 1 && n <= 25);
+}
+
+// Every amount a winner could honestly say they won from this message: the
+// amounts written in it, plus each of those split between the winners.
+function winnableAmounts(text) {
+  const base = parseAmounts(text);
+  const all = new Set(base);
+  for (const n of winnerCountsIn(text)) {
+    for (const a of base) all.add(Math.round((a / n) * 100) / 100);
+  }
+  return all;
+}
+
 // Scans the configured giveaway channels for a message that mentions the
 // ticket opener AND reads like the prize they typed. The prize doesn't have
 // to be written the same way ("20m" = "20 m" = "20 million"). Host name and
@@ -132,8 +162,9 @@ async function findGiveawayWin(guild, ownerId, prizeText, hostText = "") {
         if (!text || !mentionsUser(text, ownerId)) continue;
 
         const lower = text.toLowerCase();
+        const messageAmounts = winnableAmounts(text);
         const amountHits = wantedAmounts.length
-          ? parseAmounts(text).filter(a => wantedAmounts.includes(a)).length
+          ? wantedAmounts.filter(a => messageAmounts.has(a)).length
           : 0;
         const keywordHits = keywords.filter(w => lower.includes(w)).length;
 
